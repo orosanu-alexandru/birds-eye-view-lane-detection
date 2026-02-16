@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ro">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Camera Stream</title>
+    <style>
+      body { font-family: Arial, sans-serif; background:#111; color:#eee; text-align:center; }
+      .container { max-width: 900px; margin: 20px auto; }
+      img { width: 100%; height: auto; border-radius:8px; }
+      h1 { margin-bottom: 5px; }
+      p { color: #bbb; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Live Camera Stream</h1>
+      <p>Flux video din camera laptopului (cv2.VideoCapture(0))</p>
+
+      <!-- Imaginea va prelua stream-ul multipart JPEG de la endpoint-ul /video_feed -->
+      <div style="display:flex; gap:8px; justify-content:center; margin-bottom:8px;">
+        <button onclick="setMode('normal')">Normal</button>
+        <button onclick="setMode('bird')">Bird's-eye</button>
+        <button onclick="toggleCalibration()">Calibrare</button>
+      </div>
+      <img id="video" src="/video_feed" alt="Video feed" />
+
+      <div id="calibration" style="display:none; margin-top:12px; background:#222; padding:12px; border-radius:8px;">
+        <h3 style="margin:6px 0;">Calibrare Bird's-eye</h3>
+        <div style="display:grid; grid-template-columns:1fr 80px; gap:8px; align-items:center;">
+          <label>Top width (frac): <span id="top_width_val"></span></label>
+          <input id="top_width" type="range" min="0.01" max="0.8" step="0.01" />
+          <label>Bottom width (frac): <span id="bottom_width_val"></span></label>
+          <input id="bottom_width" type="range" min="0.2" max="1.0" step="0.01" />
+          <label>Top Y (frac): <span id="top_y_val"></span></label>
+          <input id="top_y" type="range" min="0.0" max="1.0" step="0.01" />
+          <label>Bottom Y (frac): <span id="bottom_y_val"></span></label>
+          <input id="bottom_y" type="range" min="0.0" max="1.0" step="0.01" />
+          <label>Center X (frac): <span id="center_x_val"></span></label>
+          <input id="center_x" type="range" min="0.0" max="1.0" step="0.01" />
+          <label>Rotate (deg): <span id="rotate_deg_val"></span></label>
+          <input id="rotate_deg" type="range" min="0" max="360" step="1" />
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
+          <button onclick="applyTransform()">Apply</button>
+          <button onclick="resetTransform()">Reset</button>
+        </div>
+      </div>
+
+      <script>
+        const img = document.getElementById('video');
+        let calibrationVisible = false;
+
+        function setMode(mode) {
+          if (mode === 'bird') {
+            img.src = '/video_feed_birdseye';
+          } else {
+            img.src = '/video_feed';
+          }
+        }
+
+        function toggleCalibration() {
+          calibrationVisible = !calibrationVisible;
+          document.getElementById('calibration').style.display = calibrationVisible ? 'block' : 'none';
+          if (calibrationVisible) loadTransform();
+        }
+
+        async function loadTransform() {
+          const res = await fetch('/get_transform');
+          const params = await res.json();
+          // Set slider values
+          ['top_width','bottom_width','top_y','bottom_y','center_x','rotate_deg'].forEach(k => {
+            const el = document.getElementById(k);
+            if (el) el.value = params[k];
+            const disp = document.getElementById(k + '_val');
+            if (disp) disp.textContent = params[k];
+            if (el) el.oninput = () => { if (disp) disp.textContent = el.value; };
+          });
+        }
+
+        async function applyTransform() {
+          const qs = new URLSearchParams();
+          ['top_width','bottom_width','top_y','bottom_y','center_x','rotate_deg'].forEach(k => {
+            qs.set(k, document.getElementById(k).value);
+          });
+          await fetch('/set_transform?' + qs.toString());
+          // Switch to bird view to inspect
+          setMode('bird');
+        }
+
+        async function resetTransform() {
+          // Default values should match server defaults; here we set sensible defaults
+          const defaults = {
+              top_width: 0.53,
+              bottom_width: 0.90,
+              top_y: 0.55,
+              bottom_y: 0.95,
+              center_x: 0.5,
+              rotate_deg: 0
+            };
+          const qs = new URLSearchParams(defaults);
+          await fetch('/set_transform?' + qs.toString());
+          loadTransform();
+        }
+      </script>
+
+      <p style="font-size:0.9em; margin-top:10px;">Închideți terminalul pentru a opri serverul.</p>
+    </div>
+  </body>
+</html>

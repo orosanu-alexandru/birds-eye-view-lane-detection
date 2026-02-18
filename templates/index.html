@@ -22,8 +22,14 @@
         <button onclick="setMode('normal')">Normal</button>
         <button onclick="setMode('bird')">Bird's-eye</button>
         <button onclick="toggleCalibration()">Calibrare</button>
+        <button onclick="toggleLines()">Arată Liniile</button>
       </div>
       <img id="video" src="/video_feed" alt="Video feed" />
+
+      <div id="lines_display" style="margin-top:12px; background:#222; padding:12px; border-radius:8px; display:none;">
+        <h3 style="margin:6px 0;">Liniile Detectate</h3>
+        <pre id="lines_content" style="color:#0f0; font-family:monospace; font-size:0.9em; white-space:pre-wrap;"></pre>
+      </div>
 
       <div id="calibration" style="display:none; margin-top:12px; background:#222; padding:12px; border-radius:8px;">
         <h3 style="margin:6px 0;">Calibrare Bird's-eye</h3>
@@ -41,21 +47,79 @@
           <label>Rotate (deg): <span id="rotate_deg_val"></span></label>
           <input id="rotate_deg" type="range" min="0" max="360" step="1" />
         </div>
+        <h3 style="margin:12px 0 6px 0;">Detectare Linii</h3>
+        <div style="display:grid; grid-template-columns:1fr 80px; gap:8px; align-items:center;">
+          <label>Canny Low: <span id="canny_low_val"></span></label>
+          <input id="canny_low" type="range" min="0" max="255" step="1" />
+          <label>Canny High: <span id="canny_high_val"></span></label>
+          <input id="canny_high" type="range" min="0" max="255" step="1" />
+          <label>Hough Threshold: <span id="hough_threshold_val"></span></label>
+          <input id="hough_threshold" type="range" min="1" max="200" step="1" />
+          <label>Min Line Length: <span id="min_line_length_val"></span></label>
+          <input id="min_line_length" type="range" min="1" max="200" step="1" />
+          <label>Max Line Gap: <span id="max_line_gap_val"></span></label>
+          <input id="max_line_gap" type="range" min="1" max="50" step="1" />
+        </div>
+        <h3 style="margin:12px 0 6px 0;">Grupare Linii</h3>
+        <div style="display:grid; grid-template-columns:1fr 80px; gap:8px; align-items:center;">
+          <label>Angle Threshold: <span id="angle_threshold_val"></span></label>
+          <input id="angle_threshold" type="range" min="1" max="45" step="1" />
+          <label>Position Threshold: <span id="position_threshold_val"></span></label>
+          <input id="position_threshold" type="range" min="10" max="200" step="5" />
+          <label>Min Point Distance: <span id="min_point_distance_val"></span></label>
+          <input id="min_point_distance" type="range" min="5" max="100" step="5" />
+        </div>
         <div style="margin-top:10px; display:flex; gap:8px; justify-content:center;">
-          <button onclick="applyTransform()">Apply</button>
-          <button onclick="resetTransform()">Reset</button>
+          <button onclick="applyTransform()">Apply Transform</button>
+          <button onclick="applyLineParams()">Apply Line Params</button>
+          <button onclick="applyMergeParams()">Apply Merge Params</button>
+          <button onclick="resetTransform()">Reset All</button>
         </div>
       </div>
 
       <script>
         const img = document.getElementById('video');
         let calibrationVisible = false;
+        let linesVisible = false;
+        let linesUpdateInterval = null;
 
         function setMode(mode) {
           if (mode === 'bird') {
             img.src = '/video_feed_birdseye';
           } else {
             img.src = '/video_feed';
+            // Oprește actualizarea liniilor când nu e în modul bird
+            if (linesUpdateInterval) {
+              clearInterval(linesUpdateInterval);
+              linesUpdateInterval = null;
+            }
+          }
+        }
+
+        async function updateLines() {
+          try {
+            const res = await fetch('/get_detected_lines');
+            const lines = await res.json();
+            const content = document.getElementById('lines_content');
+
+            if (lines.length === 0) {
+              content.textContent = 'Nicio linie detectată';
+              return;
+            }
+
+            let output = `Liniile detectate (${lines.length}):\n\n`;
+            lines.forEach((line, idx) => {
+              output += `Linia ${idx + 1} (${line.length} puncte):\n`;
+              line.forEach((point, pidx) => {
+                const [x, y] = point;
+                output += `  Punct ${pidx + 1}: (${x.toFixed(1)}, ${y.toFixed(1)})\n`;
+              });
+              output += '\n';
+            });
+
+            content.textContent = output;
+          } catch (error) {
+            document.getElementById('lines_content').textContent = 'Eroare la încărcarea liniilor: ' + error.message;
           }
         }
 
@@ -63,6 +127,22 @@
           calibrationVisible = !calibrationVisible;
           document.getElementById('calibration').style.display = calibrationVisible ? 'block' : 'none';
           if (calibrationVisible) loadTransform();
+        }
+
+        function toggleLines() {
+          linesVisible = !linesVisible;
+          document.getElementById('lines_display').style.display = linesVisible ? 'block' : 'none';
+          if (linesVisible) {
+            updateLines();
+            // Începe actualizarea periodică
+            linesUpdateInterval = setInterval(updateLines, 1000);
+          } else {
+            // Oprește actualizarea periodică
+            if (linesUpdateInterval) {
+              clearInterval(linesUpdateInterval);
+              linesUpdateInterval = null;
+            }
+          }
         }
 
         async function loadTransform() {
@@ -76,6 +156,28 @@
             if (disp) disp.textContent = params[k];
             if (el) el.oninput = () => { if (disp) disp.textContent = el.value; };
           });
+
+          // Load line detection params
+          const lineRes = await fetch('/get_line_params');
+          const lineParams = await lineRes.json();
+          ['canny_low','canny_high','hough_threshold','min_line_length','max_line_gap'].forEach(k => {
+            const el = document.getElementById(k);
+            if (el) el.value = lineParams[k];
+            const disp = document.getElementById(k + '_val');
+            if (disp) disp.textContent = lineParams[k];
+            if (el) el.oninput = () => { if (disp) disp.textContent = el.value; };
+          });
+
+          // Load line merge params
+          const mergeRes = await fetch('/get_line_merge_params');
+          const mergeParams = await mergeRes.json();
+          ['angle_threshold','position_threshold','min_point_distance'].forEach(k => {
+            const el = document.getElementById(k);
+            if (el) el.value = mergeParams[k];
+            const disp = document.getElementById(k + '_val');
+            if (disp) disp.textContent = mergeParams[k];
+            if (el) el.oninput = () => { if (disp) disp.textContent = el.value; };
+          });
         }
 
         async function applyTransform() {
@@ -84,6 +186,26 @@
             qs.set(k, document.getElementById(k).value);
           });
           await fetch('/set_transform?' + qs.toString());
+          // Switch to bird view to inspect
+          setMode('bird');
+        }
+
+        async function applyLineParams() {
+          const qs = new URLSearchParams();
+          ['canny_low','canny_high','hough_threshold','min_line_length','max_line_gap'].forEach(k => {
+            qs.set(k, document.getElementById(k).value);
+          });
+          await fetch('/set_line_params?' + qs.toString());
+          // Switch to bird view to inspect
+          setMode('bird');
+        }
+
+        async function applyMergeParams() {
+          const qs = new URLSearchParams();
+          ['angle_threshold','position_threshold','min_point_distance'].forEach(k => {
+            qs.set(k, document.getElementById(k).value);
+          });
+          await fetch('/set_line_merge_params?' + qs.toString());
           // Switch to bird view to inspect
           setMode('bird');
         }
@@ -100,6 +222,25 @@
             };
           const qs = new URLSearchParams(defaults);
           await fetch('/set_transform?' + qs.toString());
+
+          const lineDefaults = {
+              canny_low: 50,
+              canny_high: 150,
+              hough_threshold: 50,
+              min_line_length: 50,
+              max_line_gap: 10
+            };
+          const lineQs = new URLSearchParams(lineDefaults);
+          await fetch('/set_line_params?' + lineQs.toString());
+
+          const mergeDefaults = {
+              angle_threshold: 15,
+              position_threshold: 80,
+              min_point_distance: 20
+            };
+          const mergeQs = new URLSearchParams(mergeDefaults);
+          await fetch('/set_line_merge_params?' + mergeQs.toString());
+
           loadTransform();
         }
       </script>
